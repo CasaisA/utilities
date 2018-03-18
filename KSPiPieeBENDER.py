@@ -1,140 +1,19 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 import GaudiPython
-from PhysSelPython.Wrappers import DataOnDemand
-from Configurables import CombineParticles, ChargedProtoParticleMaker, NoPIDsParticleMaker,DaVinci,ChargedPP2MC ,LoKi__VertexFitter,OfflineVertexFitter,ParticleVertexFitter
-from CommonParticles import StdAllNoPIDsPions, StdAllNoPIDsElectrons, StdNoPIDsUpElectrons
-from CommonParticles.Utils import *
-from Gaudi.Configuration import NTupleSvc,GaudiSequencer
-from Bender.MainMC import *
+# from PhysSelPython.Wrappers import DataOnDemand
+# from Configurables import CombineParticles, ChargedProtoParticleMaker, NoPIDsParticleMaker,DaVinci,ChargedPP2MC ,LoKi__VertexFitter
 
+# from CommonParticles import StdAllNoPIDsPions, StdAllNoPIDsElectrons, StdNoPIDsUpElectrons
+# from CommonParticles.Utils import *
+# from Gaudi.Configuration import NTupleSvc,GaudiSequencer
+from Bender.MainMC import *
 from SomeUtils.alyabar import *   
 from LinkerInstances.eventassoc import * 
-
 from ROOT import *
 import math as m
 from BenderAlgo.select import selectVertexMin
 from copy import copy
-
-parser = argparse.ArgumentParser(description='Buids signal ntuple for signal KSPiPiee')
-parser.add_argument('-p', choices = ['u','d']
-                                        help='Polarity')
-parser.add_argument('--input',help='In the casa of not using ganga, the name of the DST inside the folder')
-
-args = parser.parse_args()
-
-
-if not ganga:
-    
-   #INPUTS PART
-   if str(sys.argv[1])=="u":
-       DaVinci().Input = ["/eos/lhcb/grid/prod/lhcb/MC/2012/ALLSTREAMS.DST/00037694/0000/"+str(sys.argv[2])]
-    
-   if str(sys.argv[1])=="d":
-       DaVinci().Input = ["/eos/lhcb/grid/prod/lhcb/MC/2012/ALLSTREAMS.DST/00037700/0000/"+str(sys.argv[2])]
-    
-
-
-dir = "dir/to/place/ntuples"
-#TUPLEFILE
-if str(sys.argv[1])=="u":
-    if sys.argv[3]=='offline':
-      DaVinci().TupleFile = dir+"/OfflineVertexFit/up/"+str(sys.argv[2])+".root"
-    if sys.argv[3]=='particle':
-      DaVinci().TupleFile = dir+"/ParticleVertexFit/up/"+str(sys.argv[2])+".root"
-    if sys.argv[3]=='loki':
-      DaVinci().TupleFile = dir+"/LokiVertexFit/up/"+str(sys.argv[2])+".root"
-if str(sys.argv[1])=="d":
-    if sys.argv[3]=='offline':
-       DaVinci().TupleFile = dir+"/OfflineVertexFit/down/"+str(sys.argv[2])+".root"
-    if sys.argv[3]=='particle':
-       DaVinci().TupleFile = dir+"/ParticleVertexFit/down/"+str(sys.argv[2])+".root"
-    if sys.argv[3]=='loki':   
-       DaVinci().TupleFile = dir+"/LokiVertexFit/down/"+str(sys.argv[2])+".root"
-
-
-########################
-## make VELO particles by hand
-# first make protoparticles (needed for VELO Tracks)
-## MCTRUTH MATCHING
-myprotos = ChargedProtoParticleMaker("MyProtoParticles",
-                                     Inputs = ["Rec/Track/Best"],
-                                     Output = "Rec/ProtoP/MyProtoParticles")
-
-protop_locations = [myprotos.Output]
-charged = ChargedPP2MC("myprotos")
-charged.InputData = protop_locations
-myseq = GaudiSequencer("myseq")
-myseq.Members +=[myprotos,charged]
-DaVinci().UserAlgorithms+=[myseq]
-############
-#sys.argv = [0,'u','00037694_00000006_1.allstreams.dst','particle']
-
-
-## GET MCPAR FROM PROTO
-def get_mcpar(proto):
-    LinkRef = GaudiPython.gbl.LHCb.LinkReference()
-    linker = TES["Link/Rec/ProtoP/MyProtoParticles/PP2MC"]
-    ok = linker.firstReference(proto.key(), None ,LinkRef)
-    if not ok: return 0
-    return TES["MC/Particles"][LinkRef.objectKey()]
-
-
-#now make the velo particles
-algorithm =  NoPIDsParticleMaker ( 'StdNoPIDsVeloElectrons',
-                                   DecayDescriptor = 'Electron' ,
-                                   Particle = 'electron',
-                                   AddBremPhotonTo= [],
-                                   Input = myprotos.Output)
-
-# configure the track selector
-selector = trackSelector ( algorithm,trackTypes = [ "Velo" ]  )
-locations = updateDoD ( algorithm )
-########################
-
-## build all possible combinations of track types
-combs = {"LL":"( ANUM( ( TRTYPE == 3 ) &  ( ABSID == 'e-' ) ) == 2 )",
-         "UU":"( ANUM( ( TRTYPE == 4 ) &  ( ABSID == 'e-' ) ) == 2 )",
-         "VV":"( ANUM( ( TRTYPE == 1 ) &  ( ABSID == 'e-' ) ) == 2 )",
-         "LU":"( ( ANUM( ( TRTYPE == 3 ) &  ( ABSID == 'e-' ) ) == 1 ) & ( ANUM( ( TRTYPE == 4 ) & ( ABSID == 'e-' ) ) == 1 ) )",
-         "LV":"( ( ANUM( ( TRTYPE == 3 ) &  ( ABSID == 'e-' ) ) == 1 ) & ( ANUM( ( TRTYPE == 1 ) & ( ABSID == 'e-' ) ) == 1 ) )",
-         "UV":"( ( ANUM( ( TRTYPE == 4 ) &  ( ABSID == 'e-' ) ) == 1 ) & ( ANUM( ( TRTYPE == 1 ) & ( ABSID == 'e-' ) ) == 1 ) )"}
-
-## build combinations
-Ks2pipiee = {}
-
-for name in combs:
-    Ks2pipiee[name] = CombineParticles("TrackSel"+name+"_Ks2pipiee")
-    
-    if "V" in name:
-        Ks2pipiee[name].DecayDescriptors = ["KS0 -> pi+ pi- e+ e-","KS0 -> pi+ pi- e+ e+","KS0 -> pi+ pi- e- e-"]
-        if sys.argv[3]=='loki':
-           Ks2pipiee[name].ParticleCombiners = {"" : "LoKi::VertexFitter"}
-           Ks2pipiee[name].addTool( LoKi__VertexFitter, name="LoKi::VertexFitter" )
-        if sys.argv[3]=='particle':
-        
-           Ks2pipiee[name].ParticleCombiners = {"" : "ParticleVertexFitter"}
-           Ks2pipiee[name].addTool( ParticleVertexFitter)
-        if sys.argv[3]=='offline':
-           Ks2pipiee[name].ParticleCombiners = {"" : "OfflineVertexFitter"}
-           Ks2pipiee[name].addTool( OfflineVertexFitter)
-
-        
-
-        
-    else: Ks2pipiee[name].DecayDescriptor = "KS0 -> pi+ pi- e+ e-"
-    Ks2pipiee[name].Preambulo=["from LoKiPhysMC.decorators import *",
-                               "from LoKiPhysMC.functions import mcMatch"]
-    ## only take pions mctruth matched to pions from signal...
-    Ks2pipiee[name].DaughtersCuts = {"pi+"  : "mcMatch('KS0 ==>  ^pi+ pi- e+ e-' )",
-                                     "pi-"  : "mcMatch('KS0 ==>  pi+ ^pi- e+ e-' )"}
-    Ks2pipiee[name].CombinationCut = combs[name]
-    Ks2pipiee[name].MotherCut = "ALL"
-    ## input all possible daughters
-    Ks2pipiee[name].Inputs =['Phys/StdAllNoPIDsPions', 'Phys/StdAllNoPIDsElectrons', 'Phys/StdNoPIDsUpElectrons', 'Phys/StdNoPIDsVeloElectrons']
-    DaVinci().UserAlgorithms +=[Ks2pipiee[name]]
-
-
 
 
 
@@ -153,38 +32,7 @@ def is_el_from_ks(proto):
     if pids.count(211)!=2: return False
     return mcpar.key(),mum.key()
 
-
-DaVinci().EvtMax = 0
-DaVinci().DataType = "2012"
-DaVinci().Simulation = True
-DaVinci().DDDBtag  = "dddb-20130929-1"
-DaVinci().CondDBtag = "sim-20130522-1-vc-m"+str(sys.argv[1])+"100"
-
     
-gaudi = GaudiPython.AppMgr()
-
-# combs = ['LV']
-# TES = gaudi.evtsvc()
-# cbreak = 0
-# for i in range(10000):
-#     if cbreak: break
-#     bla = gaudi.run(1)
-#     for name in combs:
-#         if cbreak: break
-#         ks0s = TES["Phys/TrackSel"+name+"_Ks2pipiee/Particles"]
-#         for ks0 in ks0s:
-#             daughters = map(lambda x: is_el_from_ks(x.proto()),ks0.daughters())
-#             #print AMAXDOCA(ks0)
-#             daughters = filter(lambda y: type(y)!=bool,daughters)
-#             if len(daughters)!=2: continue
-#             if (daughters[0][0]==daughters[1][0]) or (daughters[0][1]!=daughters[1][1]) :
-#                 continue
-#             else:
-#                 print daughters
-#                 cbreak = 1
-#                 ks = ks0
-#                 break
-
 
 
 #class to produce the nTuple
@@ -193,14 +41,14 @@ light_cte = 1000./c_light
 emass = 0.510998
 pimass = 139.5706
 
-
+gaudi = GaudiPython.AppMgr()
 TES = gaudi.evtsvc()
 
 ##class to make the ntuple
 
 class MyAlg(AlgoMC):
     def analyse(self):
-        #TES = appMgr().evtsvc()
+        #YOU NEED TO HAVE DEFINED THE PROPER TES DIRECTORY IN ORDER TO MAKE THIS WORK!
         ks0s = TES["Phys/TrackSel"+str(self.name())+"_Ks2pipiee/Particles"]
         mytup1 = self.nTuple(self.name())
         CandidateInfo = {}
@@ -413,7 +261,8 @@ class MyAlg(AlgoMC):
              u = TVector3(ux,uy,uz)
              u_t = TVector3(ux_t,uy_t,uz_t)
              u.SetMag(1.)
-             #uprim e uprima, o vector resultante dos outros tres, que ten q ser coplanario co momento do electron/positron
+             #uprim e uprima, o vector resultante dos outros tres,
+             #que ten q ser coplanario co momento do electron/positron
              p_piplus = TVector3(PX(pi1),PY(pi1),PZ(pi1))
              p_piminus = TVector3(PX(pi2),PY(pi2),PZ(pi2))
              p_eplus = TVector3(PX(e1),PY(e1),PZ(e1))
@@ -668,14 +517,4 @@ class MyAlg(AlgoMC):
         return SUCCESS
 
 
-for name in combs:
-    gaudi.addAlgorithm(MyAlg(name))
-
-
-
-
-gaudi.initialize()
-gaudi.run(-1)
-gaudi.stop()
-gaudi.finalize()
 
